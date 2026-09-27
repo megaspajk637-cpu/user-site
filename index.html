@@ -28,6 +28,9 @@
     background: #0f172a; color: #e2e8f0; font-size: 15px; outline: none;
   }
   input:focus { border-color: #6366f1; }
+  .code-input {
+    font-size: 28px; letter-spacing: 12px; text-align: center; font-weight: 700;
+  }
   .btn {
     width: 100%; margin-top: 20px; padding: 12px; border: 0; border-radius: 9px;
     background: #6366f1; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
@@ -37,6 +40,10 @@
   .btn.danger { background: #dc2626; margin-top: 10px; }
   .btn.danger:hover { background: #b91c1c; }
   .btn.ghost { background: transparent; border: 1px solid #334155; color: #cbd5e1; }
+  .btn.link {
+    background: transparent; color: #818cf8; font-weight: 500; padding: 6px;
+    margin-top: 8px; font-size: 13px; text-decoration: underline;
+  }
   .row { display: flex; gap: 10px; }
   .msg { margin-top: 14px; font-size: 14px; padding: 10px 12px; border-radius: 8px; display: none; }
   .msg.ok  { display:block; background: #064e3b; color: #6ee7b7; }
@@ -45,12 +52,15 @@
   .info div { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b; }
   .info div:last-child { border-bottom:0; }
   .info span:first-child { color:#94a3b8; }
+  .hint { font-size: 13px; color: #94a3b8; text-align: center; margin: 8px 0 0; line-height: 1.5; }
+  .hint b { color: #e2e8f0; }
   .hidden { display: none !important; }
 </style>
 </head>
 <body>
 <div class="card">
 
+  <!-- ЭКРАН 1: регистрация / вход -->
   <section id="authScreen">
     <h1>👤 Аккаунт</h1>
     <div class="tabs">
@@ -79,12 +89,33 @@
     <div id="authMsg" class="msg"></div>
   </section>
 
+  <!-- ЭКРАН 2: подтверждение email -->
+  <section id="verifyScreen" class="hidden">
+    <h1>📧 Подтвердите email</h1>
+    <p class="hint">
+      Мы отправили 6-значный код на<br />
+      <b id="verifyEmail"></b><br />
+      Введите его ниже. Код действует 10 минут.
+    </p>
+    <form id="verifyForm">
+      <label>Код из письма</label>
+      <input name="code" class="code-input" inputmode="numeric"
+             pattern="\d{6}" maxlength="6" required placeholder="000000" />
+      <button class="btn" type="submit">Подтвердить</button>
+    </form>
+    <button class="btn ghost" id="resendBtn" type="button">Отправить код ещё раз</button>
+    <button class="btn link" id="backBtn" type="button">← Назад к регистрации</button>
+    <div id="verifyMsg" class="msg"></div>
+  </section>
+
+  <!-- ЭКРАН 3: профиль -->
   <section id="profileScreen" class="hidden">
     <h1>Профиль</h1>
     <div class="info">
       <div><span>ID</span><span id="pId"></span></div>
       <div><span>Имя</span><span id="pName"></span></div>
       <div><span>Email</span><span id="pEmail"></span></div>
+      <div><span>Статус</span><span id="pStatus"></span></div>
     </div>
 
     <form id="editForm">
@@ -107,7 +138,6 @@
 </div>
 
 <script>
-  // Через прокси Vercel (vercel.json), поэтому пусто. Можно заменить на полный URL Railway.
   const API_BASE = '';
   const STORAGE_KEY = 'currentUser';
 
@@ -151,12 +181,22 @@
 
   function render() {
     const loggedIn = !!(currentUser && currentUser.id);
+    const needsVerify = loggedIn && currentUser.email_verified === false;
+
     $('authScreen').classList.toggle('hidden', loggedIn);
-    $('profileScreen').classList.toggle('hidden', !loggedIn);
-    if (loggedIn) {
+    $('verifyScreen').classList.toggle('hidden', !needsVerify);
+    $('profileScreen').classList.toggle('hidden', !loggedIn || needsVerify);
+
+    if (needsVerify) {
+      $('verifyEmail').textContent = currentUser.email;
+      clearMsg($('verifyMsg'));
+    }
+
+    if (loggedIn && !needsVerify) {
       $('pId').textContent = currentUser.id;
       $('pName').textContent = currentUser.name ?? '—';
       $('pEmail').textContent = currentUser.email ?? '—';
+      $('pStatus').textContent = currentUser.email_verified ? '✅ Подтверждён' : '⚠️ Не подтверждён';
       $('editForm').name.value = currentUser.name ?? '';
       $('editForm').email.value = currentUser.email ?? '';
       $('editForm').password.value = '';
@@ -164,6 +204,7 @@
     }
   }
 
+  /* ---------- Табы ---------- */
   $('tabRegister').onclick = () => {
     $('tabRegister').classList.add('active');
     $('tabLogin').classList.remove('active');
@@ -179,6 +220,7 @@
     clearMsg($('authMsg'));
   };
 
+  /* ---------- Регистрация ---------- */
   $('registerForm').onsubmit = async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -196,7 +238,7 @@
       });
       const user = pickUser(data);
       if (!user || !user.id) throw new Error('Сервер не вернул ID пользователя');
-      saveUser(user);
+      saveUser(user); // email_verified будет false → покажется экран verify
     } catch (err) {
       showMsg($('authMsg'), err.message, false);
     } finally {
@@ -204,6 +246,7 @@
     }
   };
 
+  /* ---------- Логин ---------- */
   $('loginForm').onsubmit = async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -227,6 +270,57 @@
     }
   };
 
+  /* ---------- Подтверждение кода ---------- */
+  $('verifyForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button');
+    btn.disabled = true; clearMsg($('verifyMsg'));
+    try {
+      const data = await api('/api/users/verify', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: currentUser.email,
+          code: form.code.value.trim(),
+        }),
+      });
+      const user = pickUser(data);
+      saveUser(user); // email_verified → true → покажется профиль
+      showMsg($('profileMsg'), 'Email подтверждён ✅');
+    } catch (err) {
+      showMsg($('verifyMsg'), err.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  /* ---------- Отправить код заново ---------- */
+  $('resendBtn').onclick = async () => {
+    clearMsg($('verifyMsg'));
+    $('resendBtn').disabled = true;
+    try {
+      const res = await api('/api/users/send-code', {
+        method: 'POST',
+        body: JSON.stringify({ email: currentUser.email }),
+      });
+      if (res.status === 'sent') {
+        showMsg($('verifyMsg'), 'Новый код отправлен ✅');
+      } else if (res.status === 'already_verified') {
+        showMsg($('verifyMsg'), 'Email уже подтверждён');
+      } else {
+        showMsg($('verifyMsg'), 'Не удалось отправить код', false);
+      }
+    } catch (err) {
+      showMsg($('verifyMsg'), err.message, false);
+    } finally {
+      $('resendBtn').disabled = false;
+    }
+  };
+
+  /* ---------- Назад к регистрации (выход без подтверждения) ---------- */
+  $('backBtn').onclick = () => saveUser(null);
+
+  /* ---------- Обновление профиля ---------- */
   $('editForm').onsubmit = async (e) => {
     e.preventDefault();
     const form = e.target;
@@ -246,7 +340,12 @@
       const user = pickUser(data) || { ...currentUser, ...body };
       delete user.password;
       saveUser(user);
-      showMsg($('profileMsg'), 'Данные обновлены ✅');
+      // Если email сменился — бэкенд сбросит verified и пришлёт новый код
+      if (user.email_verified === false) {
+        showMsg($('verifyMsg'), 'Мы отправили новый код на новый email');
+      } else {
+        showMsg($('profileMsg'), 'Данные обновлены ✅');
+      }
     } catch (err) {
       showMsg($('profileMsg'), err.message, false);
     } finally {
@@ -254,6 +353,7 @@
     }
   };
 
+  /* ---------- Удаление ---------- */
   $('deleteBtn').onclick = async () => {
     if (!confirm('Удалить аккаунт? Это действие необратимо.')) return;
     $('deleteBtn').disabled = true;
