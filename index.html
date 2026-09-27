@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Профиль пользователя</title>
+<style>
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; min-height: 100vh; display: grid; place-items: center;
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    background: #0f172a; color: #e2e8f0; padding: 20px;
+  }
+  .card {
+    width: 100%; max-width: 420px; background: #1e293b;
+    border-radius: 16px; padding: 28px; box-shadow: 0 20px 50px rgba(0,0,0,.5);
+  }
+  h1 { margin: 0 0 20px; font-size: 22px; }
+  .tabs { display: flex; gap: 6px; margin-bottom: 20px; background:#0f172a; padding:4px; border-radius:10px; }
+  .tabs button {
+    flex: 1; padding: 9px; border: 0; border-radius: 7px; cursor: pointer;
+    background: transparent; color: #94a3b8; font-size: 14px; font-weight: 600;
+  }
+  .tabs button.active { background: #334155; color: #fff; }
+  label { display: block; font-size: 13px; color: #94a3b8; margin: 14px 0 6px; }
+  input {
+    width: 100%; padding: 11px 13px; border-radius: 9px; border: 1px solid #334155;
+    background: #0f172a; color: #e2e8f0; font-size: 15px; outline: none;
+  }
+  input:focus { border-color: #6366f1; }
+  .btn {
+    width: 100%; margin-top: 20px; padding: 12px; border: 0; border-radius: 9px;
+    background: #6366f1; color: #fff; font-size: 15px; font-weight: 600; cursor: pointer;
+  }
+  .btn:hover { background: #4f46e5; }
+  .btn:disabled { opacity: .6; cursor: default; }
+  .btn.danger { background: #dc2626; margin-top: 10px; }
+  .btn.danger:hover { background: #b91c1c; }
+  .btn.ghost { background: transparent; border: 1px solid #334155; color: #cbd5e1; }
+  .row { display: flex; gap: 10px; }
+  .msg { margin-top: 14px; font-size: 14px; padding: 10px 12px; border-radius: 8px; display: none; }
+  .msg.ok  { display:block; background: #064e3b; color: #6ee7b7; }
+  .msg.err { display:block; background: #450a0a; color: #fca5a5; }
+  .info { background:#0f172a; border-radius:10px; padding:14px; margin-bottom:18px; font-size:14px; }
+  .info div { display:flex; justify-content:space-between; padding:5px 0; border-bottom:1px solid #1e293b; }
+  .info div:last-child { border-bottom:0; }
+  .info span:first-child { color:#94a3b8; }
+  .hidden { display: none !important; }
+</style>
+</head>
+<body>
+<div class="card">
+
+  <section id="authScreen">
+    <h1>👤 Аккаунт</h1>
+    <div class="tabs">
+      <button id="tabRegister" class="active">Регистрация</button>
+      <button id="tabLogin">Вход</button>
+    </div>
+
+    <form id="registerForm">
+      <label>Имя</label>
+      <input name="name" required placeholder="Иван" />
+      <label>Email</label>
+      <input name="email" type="email" required placeholder="ivan@mail.com" />
+      <label>Пароль</label>
+      <input name="password" type="password" required minlength="6" placeholder="минимум 6 символов" />
+      <button class="btn" type="submit">Зарегистрироваться</button>
+    </form>
+
+    <form id="loginForm" class="hidden">
+      <label>Email</label>
+      <input name="email" type="email" required />
+      <label>Пароль</label>
+      <input name="password" type="password" required />
+      <button class="btn" type="submit">Войти</button>
+    </form>
+
+    <div id="authMsg" class="msg"></div>
+  </section>
+
+  <section id="profileScreen" class="hidden">
+    <h1>Профиль</h1>
+    <div class="info">
+      <div><span>ID</span><span id="pId"></span></div>
+      <div><span>Имя</span><span id="pName"></span></div>
+      <div><span>Email</span><span id="pEmail"></span></div>
+    </div>
+
+    <form id="editForm">
+      <label>Новое имя</label>
+      <input name="name" required />
+      <label>Новый email</label>
+      <input name="email" type="email" required />
+      <label>Новый пароль (оставьте пустым, чтобы не менять)</label>
+      <input name="password" type="password" minlength="6" placeholder="••••••" />
+      <div class="row">
+        <button class="btn" type="submit">Сохранить</button>
+        <button class="btn ghost" type="button" id="logoutBtn">Выйти</button>
+      </div>
+    </form>
+
+    <button class="btn danger" id="deleteBtn">Удалить аккаунт</button>
+    <div id="profileMsg" class="msg"></div>
+  </section>
+
+</div>
+
+<script>
+  // Через прокси Vercel (vercel.json), поэтому пусто. Можно заменить на полный URL Railway.
+  const API_BASE = '';
+  const STORAGE_KEY = 'currentUser';
+
+  const $ = (id) => document.getElementById(id);
+
+  function showMsg(el, text, ok = true) {
+    el.textContent = text;
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+  }
+  function clearMsg(el) { el.className = 'msg'; el.textContent = ''; }
+
+  async function api(path, options = {}) {
+    const res = await fetch(API_BASE + path, {
+      headers: { 'Content-Type': 'application/json' },
+      ...options,
+    });
+    const raw = await res.text();
+    let data = null;
+    try { data = raw ? JSON.parse(raw) : null; } catch { data = raw; }
+    if (!res.ok) {
+      const msg = (data && (data.message || data.detail || data.error)) || `Ошибка ${res.status}`;
+      throw new Error(typeof msg === 'string' ? msg : JSON.stringify(msg));
+    }
+    return data;
+  }
+
+  function pickUser(data) {
+    if (!data) return null;
+    return data.user || data.data || data;
+  }
+
+  let currentUser = null;
+  try { currentUser = JSON.parse(localStorage.getItem(STORAGE_KEY)); } catch {}
+
+  function saveUser(u) {
+    currentUser = u;
+    if (u) localStorage.setItem(STORAGE_KEY, JSON.stringify(u));
+    else localStorage.removeItem(STORAGE_KEY);
+    render();
+  }
+
+  function render() {
+    const loggedIn = !!(currentUser && currentUser.id);
+    $('authScreen').classList.toggle('hidden', loggedIn);
+    $('profileScreen').classList.toggle('hidden', !loggedIn);
+    if (loggedIn) {
+      $('pId').textContent = currentUser.id;
+      $('pName').textContent = currentUser.name ?? '—';
+      $('pEmail').textContent = currentUser.email ?? '—';
+      $('editForm').name.value = currentUser.name ?? '';
+      $('editForm').email.value = currentUser.email ?? '';
+      $('editForm').password.value = '';
+      clearMsg($('profileMsg'));
+    }
+  }
+
+  $('tabRegister').onclick = () => {
+    $('tabRegister').classList.add('active');
+    $('tabLogin').classList.remove('active');
+    $('registerForm').classList.remove('hidden');
+    $('loginForm').classList.add('hidden');
+    clearMsg($('authMsg'));
+  };
+  $('tabLogin').onclick = () => {
+    $('tabLogin').classList.add('active');
+    $('tabRegister').classList.remove('active');
+    $('loginForm').classList.remove('hidden');
+    $('registerForm').classList.add('hidden');
+    clearMsg($('authMsg'));
+  };
+
+  $('registerForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button');
+    btn.disabled = true; clearMsg($('authMsg'));
+    try {
+      const body = {
+        name: form.name.value.trim(),
+        email: form.email.value.trim(),
+        password: form.password.value,
+      };
+      const data = await api('/api/users/register', {
+        method: 'POST',
+        body: JSON.stringify(body),
+      });
+      const user = pickUser(data);
+      if (!user || !user.id) throw new Error('Сервер не вернул ID пользователя');
+      saveUser(user);
+    } catch (err) {
+      showMsg($('authMsg'), err.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('loginForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button');
+    btn.disabled = true; clearMsg($('authMsg'));
+    try {
+      const data = await api('/api/users/login', {
+        method: 'POST',
+        body: JSON.stringify({
+          email: form.email.value.trim(),
+          password: form.password.value,
+        }),
+      });
+      const user = pickUser(data);
+      if (!user || !user.id) throw new Error('Неверный ответ сервера');
+      saveUser(user);
+    } catch (err) {
+      showMsg($('authMsg'), err.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('editForm').onsubmit = async (e) => {
+    e.preventDefault();
+    const form = e.target;
+    const btn = form.querySelector('button[type=submit]');
+    btn.disabled = true; clearMsg($('profileMsg'));
+    try {
+      const body = {
+        name: form.name.value.trim(),
+        email: form.email.value.trim(),
+      };
+      if (form.password.value) body.password = form.password.value;
+
+      const data = await api(`/api/users/${currentUser.id}`, {
+        method: 'PUT',
+        body: JSON.stringify(body),
+      });
+      const user = pickUser(data) || { ...currentUser, ...body };
+      delete user.password;
+      saveUser(user);
+      showMsg($('profileMsg'), 'Данные обновлены ✅');
+    } catch (err) {
+      showMsg($('profileMsg'), err.message, false);
+    } finally {
+      btn.disabled = false;
+    }
+  };
+
+  $('deleteBtn').onclick = async () => {
+    if (!confirm('Удалить аккаунт? Это действие необратимо.')) return;
+    $('deleteBtn').disabled = true;
+    try {
+      await api(`/api/users/${currentUser.id}`, { method: 'DELETE' });
+      saveUser(null);
+    } catch (err) {
+      showMsg($('profileMsg'), err.message, false);
+      $('deleteBtn').disabled = false;
+    }
+  };
+
+  $('logoutBtn').onclick = () => saveUser(null);
+
+  render();
+</script>
+</body>
+</html>
